@@ -23,6 +23,7 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 use std::collections::HashMap;
+use std::fs::read_to_string;
 
 struct App {
     should_exit: bool,
@@ -37,6 +38,9 @@ struct App {
     pad_just_moved_from: Vec<Option<(i32, i32)>>,
     pad_just_pressed: Vec<bool>,
     input_pointer: i32,
+    input_lines: Vec<String>,
+    input_count: usize,
+    akt_line: usize,
 
     input: String,
 }
@@ -66,9 +70,14 @@ impl App {
             pad_just_pressed,
             input: String::new(),
             input_pointer: 0,
+            input_lines: vec![],
+            input_count: 0,
+            akt_line: 0,
         }
     }
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+        self.input_lines = load_file();
+        self.input_count = self.input_lines.len();
         while !self.should_exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
@@ -78,10 +87,22 @@ impl App {
     fn handle_events(&mut self) -> Result<()> {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
-                if key.code == KeyCode::Char('q') {
-                    self.should_exit = true;
-                } else {
-                    self.key_pressed = Some(key.code);
+                if let KeyCode::Char(c) = key.code {
+                    if c == 'q' {
+                        self.should_exit = true;
+                    } else {
+                        let c_i = c.to_digit(10);
+                        if c_i.is_some() && c_i.unwrap() > 0 {
+                            let n = c_i.unwrap() - 1;
+                            if n < self.input_count as u32 {
+                                self.akt_line = (n) as usize;
+                                self.input_pointer = self
+                                    .input_pointer
+                                    .min(self.input_lines[n as usize].len() as i32);
+                            }
+                        }
+                    }
+                } else {                  self.key_pressed = Some(key.code);
                 }
             }
         }
@@ -89,7 +110,8 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let command_string = "DLLARRUA";
+        //        let command_string = "DLLARRUA";
+        let command_string = self.input_lines[self.akt_line].clone();
         let commands: Vec<char> = command_string.chars().map(|c| c).collect();
 
         let dir_button_signals = HashMap::from([
@@ -136,6 +158,8 @@ impl App {
         self.pad_just_moved_to = vec![false, false, false, false];
         self.pad_just_moved_from = vec![None, None, None, None];
         self.pad_just_pressed = vec![false, false, false, false];
+
+        let mut pad_output: String = String::new();
 
         let mut signal: Option<&char>;
         'a: for c in commands[0..self.input_pointer as usize].iter() {
@@ -212,6 +236,15 @@ impl App {
                             signal = None;
                         }
                         'A' => {
+                            if pad == 3 {
+                                pad_output = pad_output
+                                    + num_button_signals
+                                        .get(&(self.pad_x[pad], self.pad_y[pad]))
+                                        .unwrap()
+                                        .to_string()
+                                        .as_str();
+                            }
+
                             self.pad_just_pressed[pad] = true;
                             signal = match pad {
                                 0..=2 => Some(
@@ -238,18 +271,40 @@ impl App {
             }
         }
 
-        let [main_area] = Layout::default().areas(frame.area());
-        let [title_area, input_area, pad_area] = Layout::vertical([
+        /////////////////////////////////////////////////
+        //  Layout and Rendering  ///////////////////////
+        /////////////////////////////////////////////////
+
+        let empty_paragraph = Paragraph::new("");
+
+        // layout main areas
+
+        let [input_area, pad_area, nav_area] = Layout::vertical([
             Constraint::Length(3),
+            Constraint::Length(14),
             Constraint::Length(3),
-            Constraint::Length(16),
         ])
         .spacing(1)
-        .areas(frame.area());
+        .areas(inner_rect(&frame.area()));
 
-        let pads_rect = Layout::horizontal([Constraint::Length(25); 4])
+        // layout input buttons
+
+        let input_buttons: Vec<Rect> = Layout::horizontal([Constraint::Length(7); 10])
+            .split(input_area)
+            .to_vec();
+
+        // layout pads
+
+        let pads_rect = Layout::horizontal([Constraint::Length(25); 5])
             .spacing(3)
             .split(pad_area);
+
+        // layout output and steps
+
+        let [output_rect, steps_rect] =
+            Layout::vertical([Constraint::Length(3); 2]).areas(pads_rect[4]);
+
+        // layout buttons
 
         let two_rows = Layout::vertical([Constraint::Length(3); 2]).margin(1);
         let four_rows = Layout::vertical([Constraint::Length(3); 4]).margin(1);
@@ -270,17 +325,39 @@ impl App {
                 }
             }
         }
-        // buttons
 
-        render_borders(
-            "".to_string(),
-            &Paragraph::new("Day 21 Key Sim"),
-            Borders::ALL,
-            frame,
-            title_area,
-        );
-        let input = Paragraph::new(self.input.as_str()).block(Block::bordered().title("Input"));
-        frame.render_widget(input, input_area);
+        // render outer frame
+
+        let block = Block::bordered()
+            .title(Line::from("  Key Sim 2024  ").centered())
+            .title(Line::from(" help: ? ").right_aligned());
+        frame.render_widget(empty_paragraph.clone().block(block), frame.area());
+
+        // render input buttons
+
+        let inactive_line_style = Style::new().white().on_black().bold();
+        let active_line_style = Style::new().black().on_green().bold();
+        let mut style;
+        for i in 0..9 {
+            if i < self.input_count {
+                let text = (i + 1).to_string();
+                if i == self.akt_line {
+                    style = active_line_style;
+                } else {
+                    style = inactive_line_style;
+                }
+                render_button(
+                    "".to_string(),
+                    &Paragraph::new(text).centered(),
+                    Borders::ALL,
+                    frame,
+                    input_buttons[i],
+                    style,
+                );
+            }
+        }
+
+        // render pads
 
         let box_normal_style = Style::new().white().on_black();
         let box_error_style = Style::new().black().on_red();
@@ -300,6 +377,28 @@ impl App {
                 pads_rect[i],
             );
         }
+
+        // render output
+
+        render_borders(
+            "output".to_string(),
+            &Paragraph::new(pad_output),
+            Borders::ALL,
+            frame,
+            output_rect,
+        );
+
+        // render steps
+
+        render_borders(
+            "steps".to_string(),
+            &Paragraph::new(self.input_pointer.to_string()),
+            Borders::ALL,
+            frame,
+            steps_rect,
+        );
+
+        // render buttons
 
         let dir_labels = vec!["", "^", "A", "<", "v", ">"];
         let num_labels = vec!["7", "8", "9", "4", "5", "6", "1", "2", "3", "", "0", "A"];
@@ -345,6 +444,45 @@ impl App {
                 style,
             );
         }
+
+        // render nav
+
+        let nav_string = " ".to_string() + command_string.as_str();
+
+        let mut pre_cursor = "";
+        if self.input_pointer > 0 {
+            pre_cursor = &nav_string[0..self.input_pointer as usize];
+        }
+        let cursor = &nav_string[self.input_pointer as usize..self.input_pointer as usize + 1];
+        let post_cursor = &nav_string[self.input_pointer as usize + 1..];
+
+        // define areas
+
+        let pre_rect: Rect = Rect {
+            x: nav_area.x + 1,
+            y: nav_area.y + 1,
+            width: pre_cursor.len() as u16,
+            height: 1,
+        };
+        let cursor_rect: Rect = Rect {
+            x: pre_rect.x + pre_rect.width,
+            y: nav_area.y + 1,
+            width: 1,
+            height: 1,
+        };
+        let post_rect: Rect = Rect {
+            x: cursor_rect.x + 1,
+            y: cursor_rect.y,
+            width: nav_area.width - pre_rect.width - 3,
+            height: 1,
+        };
+
+        let pre_para = Paragraph::new(pre_cursor).style(Style::new().white().on_blue());
+        let cursor_para = Paragraph::new(cursor).style(Style::new().black().on_green());
+        let post_para = Paragraph::new(post_cursor).style(Style::new().white().on_blue());
+        frame.render_widget(pre_para, pre_rect);
+        frame.render_widget(cursor_para, cursor_rect);
+        frame.render_widget(post_para, post_rect);
     }
 }
 
@@ -359,6 +497,15 @@ fn main() -> Result<()> {
 /// Calculate the layout of the UI elements.
 ///
 /// Returns a tuple of the title area and the main areas.
+
+fn inner_rect(r: &Rect) -> Rect {
+    Rect {
+        x: r.x + 1,
+        y: r.y + 1,
+        width: r.width - 2,
+        height: r.height - 2,
+    }
+}
 
 fn render_title(frame: &mut Frame, area: Rect) {
     frame.render_widget(
@@ -384,7 +531,7 @@ fn render_borders(
     let block = Block::new()
         .borders(border)
         .title(title)
-        .padding(Padding::new(1, 1, 1, 1));
+        .padding(Padding::new(1, 0, 0, 0));
     frame.render_widget(paragraph.clone().block(block), area);
 }
 
@@ -411,4 +558,25 @@ fn render_button(
         .style(style)
         .padding(Padding::new(0, 0, 0, 0));
     frame.render_widget(paragraph.clone().block(block), area);
+}
+
+fn load_file() -> Vec<String> {
+    let filename = "keypad2024input.txt";
+    let mut lines = Vec::new();
+    //println!("{:?}", path);
+    for line in read_to_string(filename).unwrap().lines() {
+        let mut l = line.to_string();
+        if l.chars().all(|c| "<>^vA".contains(c)) {
+            l = l.replacen("v", "D", 99999);
+            l = l.replacen("^", "U", 99999);
+            l = l.replacen("<", "L", 99999);
+            l = l.replacen(">", "R", 99999);
+        }
+        if l.chars().all(|c| "LRUDA".contains(c)) {
+            if lines.len() < 9 {
+                lines.push(l);
+            }
+        }
+    }
+    lines
 }
