@@ -14,12 +14,13 @@
 //! [examples readme]: https://github.com/ratatui/ratatui/blob/main/examples/README.md
 
 use color_eyre::{owo_colors::OwoColorize, Result};
+
 use ratatui::{
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Style, Stylize},
-    text::Line,
-    widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap},
+    text::{Line, Span, Text},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Wrap},
     DefaultTerminal, Frame,
 };
 use std::collections::HashMap;
@@ -41,6 +42,7 @@ struct App {
     input_lines: Vec<String>,
     input_count: usize,
     akt_line: usize,
+    show_help: bool,
 
     input: String,
 }
@@ -73,6 +75,7 @@ impl App {
             input_lines: vec![],
             input_count: 0,
             akt_line: 0,
+            show_help: false,
         }
     }
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
@@ -88,21 +91,35 @@ impl App {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 if let KeyCode::Char(c) = key.code {
-                    if c == 'q' {
-                        self.should_exit = true;
-                    } else {
-                        let c_i = c.to_digit(10);
-                        if c_i.is_some() && c_i.unwrap() > 0 {
-                            let n = c_i.unwrap() - 1;
-                            if n < self.input_count as u32 {
-                                self.akt_line = (n) as usize;
-                                self.input_pointer = self
-                                    .input_pointer
-                                    .min(self.input_lines[n as usize].len() as i32);
+                    match c {
+                        'q' => {
+                            self.should_exit = true;
+                        }
+                        '?' => {
+                            self.show_help = true;
+                        }
+                        _ => {
+                            let c_i = c.to_digit(10);
+                            if c_i.is_some() && c_i.unwrap() > 0 {
+                                let n = c_i.unwrap() - 1;
+                                if n < self.input_count as u32 {
+                                    self.akt_line = (n) as usize;
+                                    self.input_pointer = self
+                                        .input_pointer
+                                        .min(self.input_lines[n as usize].len() as i32);
+                                }
                             }
                         }
                     }
-                } else {                  self.key_pressed = Some(key.code);
+                } else {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.show_help = false;
+                        }
+                        _ => {
+                            self.key_pressed = Some(key.code);
+                        }
+                    }
                 }
             }
         }
@@ -142,9 +159,7 @@ impl App {
         let num_valid_signals = vec!['A', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
         if self.key_pressed.is_some() {
             self.input_pointer = match self.key_pressed.unwrap() {
-                KeyCode::Char(' ') | KeyCode::Right => {
-                    (self.input_pointer + 1).min(command_string.len() as i32)
-                }
+                KeyCode::Right => (self.input_pointer + 1).min(command_string.len() as i32),
                 KeyCode::Left => (self.input_pointer - 1).max(0),
 
                 _ => self.input_pointer,
@@ -287,6 +302,15 @@ impl App {
         .spacing(1)
         .areas(inner_rect(&frame.area()));
 
+        //layout help popup
+
+        let popup_rect: Rect = Rect {
+            x: frame.area().x + 2,
+            y: frame.area().y + 2,
+            width: frame.area().width - 4,
+            height: frame.area().height - 4,
+        };
+
         // layout input buttons
 
         let input_buttons: Vec<Rect> = Layout::horizontal([Constraint::Length(7); 10])
@@ -329,8 +353,8 @@ impl App {
         // render outer frame
 
         let block = Block::bordered()
-            .title(Line::from("  Key Sim 2024  ").centered())
-            .title(Line::from(" help: ? ").right_aligned());
+            .title(Line::from("  Keypad Sim 2024  ").centered())
+            .title(Line::from(" help: ?   quit q ").right_aligned());
         frame.render_widget(empty_paragraph.clone().block(block), frame.area());
 
         // render input buttons
@@ -483,6 +507,34 @@ impl App {
         frame.render_widget(pre_para, pre_rect);
         frame.render_widget(cursor_para, cursor_rect);
         frame.render_widget(post_para, post_rect);
+
+        // render help popup, make sure to render last
+
+        let help_lines = [
+            "",
+            "This tool simulates the keypads for Advent of Code 2024 Day 21.",
+            "",
+            "Input is read from file keypad2024input.txt",
+            "",
+            "Keys;",
+            "1 - 9 select input strings",
+            "left and right arrows navigate through selected string",
+            "? shows this help, q quits the program",
+            "",
+        ];
+        let mut span_lines = vec![];
+        for l in help_lines {
+            span_lines.push(Line::raw(l).centered());
+        }
+        span_lines.push(Line::raw("ESC to close").centered().black().on_green());
+        let help_text = Text::from(span_lines);
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .title(Line::from(" Help ").centered());
+        if self.show_help {
+            frame.render_widget(Clear, popup_rect);
+            frame.render_widget(Paragraph::new(help_text).block(block), popup_rect);
+        }
     }
 }
 
@@ -505,20 +557,6 @@ fn inner_rect(r: &Rect) -> Rect {
         width: r.width - 2,
         height: r.height - 2,
     }
-}
-
-fn render_title(frame: &mut Frame, area: Rect) {
-    frame.render_widget(
-        Paragraph::new("Block example. Press q to quit")
-            .dark_gray()
-            .alignment(Alignment::Center),
-        area,
-    );
-}
-
-fn placeholder_paragraph() -> Paragraph<'static> {
-    let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
-    Paragraph::new(text.dark_gray()).wrap(Wrap { trim: true })
 }
 
 fn render_borders(
@@ -566,6 +604,9 @@ fn load_file() -> Vec<String> {
     //println!("{:?}", path);
     for line in read_to_string(filename).unwrap().lines() {
         let mut l = line.to_string();
+        if l.len() == 0 {
+            continue;
+        }
         if l.chars().all(|c| "<>^vA".contains(c)) {
             l = l.replacen("v", "D", 99999);
             l = l.replacen("^", "U", 99999);

@@ -1,3 +1,18 @@
+# Input file for keysim  2024
+#
+# maximum 9 strings are considered, from top to bottom
+#
+# two different formats are allowed for up,down,left,right,press, 
+# but these can not be mixed within one string:
+#
+# U D L R A
+# ^ v < > A
+#
+# empty lines and lines starting with # are ignored
+#
+# all lines that do not comply with format are ignored
+#
+
 DLLARRUA
 DLLA
 DLLARRUADAUADLLARRUAADLALARRUAADAAULARADLARUAALARADLALARRUAAADAULARA
